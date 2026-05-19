@@ -7,164 +7,33 @@ import './style.css';
 const supabaseUrl=import.meta.env.VITE_SUPABASE_URL;
 const supabaseKey=import.meta.env.VITE_SUPABASE_ANON_KEY;
 const supabase=supabaseUrl&&supabaseKey?createClient(supabaseUrl,supabaseKey):null;
-
 const categories=['Kühlung','Getränke','Milchprodukte','Snacks','Süßwaren','Backshop','Sonstiges'];
-const staff=['Michael','Christian'];
-
+const staff=['Michael','Ali','Mara','Sven','Lisa','Nina','Tom'];
+const reasons=['Abgelaufen','Backwaren Tagesende','Beschädigt','Kühlkette unterbrochen','Sonstiges'];
 function daysUntil(d){const today=new Date();today.setHours(0,0,0,0);return Math.ceil((new Date(d+'T00:00:00')-today)/86400000)}
 function status(mhd){const d=daysUntil(mhd); if(d<0)return{t:'Abgelaufen',c:'bad',I:AlertTriangle}; if(d<=2)return{t:'Heute/Bald',c:'warn',I:Clock}; if(d<=7)return{t:'Diese Woche',c:'soon',I:Clock}; return{t:'OK',c:'ok',I:CheckCircle2}}
+function loginMail(n){return `${String(n).trim()}@tankstelle.local`}
 function mapCat(p){const t=`${p.categories||''} ${(p.categories_tags||[]).join(' ')}`.toLowerCase(); if(t.includes('drink')||t.includes('beverage')||t.includes('getränk'))return'Getränke'; if(t.includes('milk')||t.includes('dairy')||t.includes('joghurt')||t.includes('käse'))return'Milchprodukte'; if(t.includes('snack')||t.includes('chips')||t.includes('nuts'))return'Snacks'; if(t.includes('chocolate')||t.includes('candy')||t.includes('sweet')||t.includes('süß'))return'Süßwaren'; if(t.includes('sandwich')||t.includes('bakery')||t.includes('bread'))return'Backshop'; return'Sonstiges'}
-
-async function fetchProduct(barcode){
-  try{
-    const r=await fetch(`https://world.openfoodfacts.org/api/v2/product/${barcode}.json?fields=product_name,brands,image_front_url,categories,categories_tags`);
-    const j=await r.json();
-    if(j.status!==1)return null;
-    const p=j.product;
-    return{artikel:[p.brands,p.product_name].filter(Boolean).join(' · ')||barcode,bild_url:p.image_front_url||'',kategorie:mapCat(p)}
-  }catch{return null}
-}
-
+async function fetchProduct(barcode){try{const r=await fetch(`https://world.openfoodfacts.org/api/v2/product/${barcode}.json?fields=product_name,brands,image_front_url,categories,categories_tags`); const j=await r.json(); if(j.status!==1)return null; const p=j.product; return{artikel:[p.brands,p.product_name].filter(Boolean).join(' · ')||barcode,bild_url:p.image_front_url||'',kategorie:mapCat(p)}}catch{return null}}
 async function registerSW(){if('serviceWorker'in navigator)try{await navigator.serviceWorker.register('/sw.js')}catch(e){console.warn(e)}}
-
-async function notify(items){
-  if(!('Notification'in window))return alert('Benachrichtigungen nicht unterstützt');
-  if(Notification.permission!=='granted'){const p=await Notification.requestPermission(); if(p!=='granted')return}
-  await registerSW();
-  const exp=items.filter(x=>daysUntil(x.mhd)<=2);
-  const text=exp.length?exp.slice(0,5).map(x=>`${x.artikel} · MHD ${new Date(x.mhd).toLocaleDateString('de-DE')}`).join('\n'):'Aktuell läuft nichts innerhalb von 2 Tagen ab.';
-  const reg=await navigator.serviceWorker?.ready;
-  if(reg?.showNotification) reg.showNotification(exp.length?'MHD Warnung':'MHD Kontrolle',{body:text,tag:'mhd'});
-  else new Notification(exp.length?'MHD Warnung':'MHD Kontrolle',{body:text})
-}
-
-async function scan(){
-  if(!('BarcodeDetector'in window)){alert('Barcode-Scanner wird auf diesem Browser nicht unterstützt. Bitte Chrome/Android nutzen oder Barcode eintippen.');return null}
-  const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
-  const video=document.createElement('video');
-  video.srcObject=stream;
-  video.playsInline=true;
-  await video.play();
-  const det=new BarcodeDetector({formats:['ean_13','ean_8','upc_a','upc_e','code_128']});
-  return new Promise(res=>{
-    let stop=false;
-    const o=document.createElement('div');
-    o.className='scanOverlay';
-    o.innerHTML='<div class="scanText">Barcode vor die Kamera halten</div>';
-    const b=document.createElement('button');
-    b.textContent='Abbrechen';
-    b.className='btn light';
-    video.className='scanVideo';
-    o.append(video,b);
-    document.body.append(o);
-    function close(v){if(stop)return;stop=true;stream.getTracks().forEach(t=>t.stop());o.remove();res(v)}
-    b.onclick=()=>close(null);
-    async function loop(){if(stop)return; try{const c=await det.detect(video); if(c.length)return close(c[0].rawValue)}catch{} requestAnimationFrame(loop)}
-    loop()
-  })
-}
-
-function App(){
-  const[session,setSession]=useState(null);
-  const[auth,setAuth]=useState(true);
-  const[nr,setNr]=useState('');
-  const[pw,setPw]=useState('');
-  const[err,setErr]=useState('');
-  const[items,setItems]=useState([]);
-  const[offs,setOffs]=useState([]);
-  const[view,setView]=useState('artikel');
-  const[q,setQ]=useState('');
-  const[cat,setCat]=useState('alle');
-  const[loading,setLoading]=useState(false);
-  const[form,setForm]=useState({artikel:'',barcode:'',bild_url:'',kategorie:'Kühlung',mhd:'',menge:'',mitarbeiter:'Michael'});
-
-  useEffect(()=>{registerSW(); setAuth(false)},[]);
-
-  async function doLogin(){
-    setErr('');
-    const {data,error}=await supabase
-      .from('mitarbeiter')
-      .select('*')
-      .eq('nummer',Number(nr))
-      .eq('passwort',pw)
-      .single();
-
-    if(error||!data){
-      setErr('Login fehlgeschlagen. Nummer oder Passwort prüfen.');
-      return;
-    }
-
-    setSession({user:{id:data.id,name:data.name}});
-    setForm(f=>({...f,mitarbeiter:data.name||'Michael'}));
-  }
-
-  async function load(){
-    if(!session)return;
-    setLoading(true);
-    const a=await supabase.from('mhd_artikel').select('*').order('mhd',{ascending:true});
-    const b=await supabase.from('abschriften').select('*').order('created_at',{ascending:false});
-    if(a.error)setErr('Artikel konnten nicht geladen werden.');
-    else setItems(a.data||[]);
-    if(!b.error)setOffs(b.data||[]);
-    setLoading(false)
-  }
-
-  useEffect(()=>{
-    if(!session)return;
-    load();
-    const ch=supabase.channel('live')
-      .on('postgres_changes',{event:'*',schema:'public',table:'mhd_artikel'},load)
-      .on('postgres_changes',{event:'*',schema:'public',table:'abschriften'},load)
-      .subscribe();
-    return()=>supabase.removeChannel(ch)
-  },[session]);
-
-  const filtered=useMemo(()=>items.filter(i=>(cat==='alle'||i.kategorie===cat)&&`${i.artikel} ${i.mitarbeiter} ${i.barcode||''}`.toLowerCase().includes(q.toLowerCase())).sort((a,b)=>new Date(a.mhd)-new Date(b.mhd)),[items,q,cat]);
-  const stats=useMemo(()=>({total:items.length,bad:items.filter(i=>daysUntil(i.mhd)<0).length,warn:items.filter(i=>daysUntil(i.mhd)>=0&&daysUntil(i.mhd)<=2).length,week:items.filter(i=>daysUntil(i.mhd)>2&&daysUntil(i.mhd)<=7).length}),[items]);
-
-  async function add(){
-    if(!form.artikel||!form.mhd)return setErr('Bitte Artikelname und MHD eintragen.');
-    const {error}=await supabase.from('mhd_artikel').insert({...form,menge:Number(form.menge||1),barcode:form.barcode||null,bild_url:form.bild_url||null,user_id:session.user.id});
-    if(error)setErr('Speichern fehlgeschlagen.');
-    else{setForm({...form,artikel:'',barcode:'',bild_url:'',mhd:'',menge:''});load()}
-  }
-
-  async function remove(id){await supabase.from('mhd_artikel').delete().eq('id',id);load()}
-
-  async function writeOff(item,grund='Abgelaufen'){
-    await supabase.from('abschriften').insert({artikel:item.artikel,barcode:item.barcode,kategorie:item.kategorie,mhd:item.mhd,menge:item.menge,grund,mitarbeiter:form.mitarbeiter,bild_url:item.bild_url,user_id:session.user.id});
-    await remove(item.id)
-  }
-
-  async function doScan(){
-    const code=await scan();
-    if(!code)return;
-    setForm(f=>({...f,barcode:code}));
-    const p=await fetchProduct(code);
-    if(p)setForm(f=>({...f,barcode:code,artikel:p.artikel||f.artikel,kategorie:p.kategorie||f.kategorie,bild_url:p.bild_url||f.bild_url}));
-    else setErr('Kein Produkt gefunden. Bitte manuell eintragen.')
-  }
-
-  async function uploadImage(e){
-    const file=e.target.files?.[0];
-    if(!file)return;
-    const path=`artikel/${Date.now()}-${file.name}`;
-    const {error}=await supabase.storage.from('artikelbilder').upload(path,file,{upsert:true});
-    if(error)return setErr('Bild konnte nicht hochgeladen werden.');
-    const {data}=supabase.storage.from('artikelbilder').getPublicUrl(path);
-    setForm(f=>({...f,bild_url:data.publicUrl}))
-  }
-
-  if(auth)return <div className='center'>Lade...</div>;
-  if(!supabase)return <div className='center'>Supabase ENV Variablen fehlen.</div>;
-  if(!session)return <div className='login'><div className='card loginCard'><h1>MHD Kontrolle</h1><p>Mitarbeiter-Nummer und Passwort</p><input placeholder='Nummer z.B. 9' value={nr} onChange={e=>setNr(e.target.value)}/><input placeholder='Passwort' type='password' value={pw} onChange={e=>setPw(e.target.value)} onKeyDown={e=>e.key==='Enter'&&doLogin()}/><button onClick={doLogin}>Einloggen</button>{err&&<b className='error'>{err}</b>}</div></div>;
-
-  return <div className='app'><header><div><small>Tankstelle Ludweiler · MHD Kontrolle</small><h1>MHD Dashboard</h1><p>Barcode, Bilder, MHD-Warnungen und Abschriften.</p></div><div className='headBtns'><button onClick={()=>notify(items)}><Bell size={18}/> Benachrichtigung</button><button onClick={()=>setSession(null)}><LogOut size={18}/> Abmelden</button></div></header><section className='stats'><Card t='Gesamt' v={stats.total}/><Card t='Abgelaufen' v={stats.bad} c='bad'/><Card t='Heute/Bald' v={stats.warn} c='warn'/><Card t='Diese Woche' v={stats.week} c='soon'/></section><section className='card form'><input placeholder='Artikelname' value={form.artikel} onChange={e=>setForm({...form,artikel:e.target.value})}/><div className='row'><input placeholder='Barcode' value={form.barcode} onChange={e=>setForm({...form,barcode:e.target.value})} onBlur={async()=>{const p=await fetchProduct(form.barcode); if(p)setForm(f=>({...f,artikel:f.artikel||p.artikel,kategorie:p.kategorie,bild_url:p.bild_url}))}}/><button onClick={doScan}><ScanBarcode size={18}/></button></div><select value={form.kategorie} onChange={e=>setForm({...form,kategorie:e.target.value})}>{categories.map(x=><option key={x}>{x}</option>)}</select><input type='date' value={form.mhd} onChange={e=>setForm({...form,mhd:e.target.value})}/><input type='number' placeholder='Menge' value={form.menge} onChange={e=>setForm({...form,menge:e.target.value})}/><select value={form.mitarbeiter} onChange={e=>setForm({...form,mitarbeiter:e.target.value})}>{staff.map(x=><option key={x}>{x}</option>)}</select><label className='upload'><Camera size={18}/> Eigenes Bild<input type='file' accept='image/*' onChange={uploadImage}/></label>{form.bild_url&&<img className='preview' src={form.bild_url}/>}<button className='add' onClick={add}><Plus size={18}/> Artikel hinzufügen</button></section>{err&&<div className='errorBox'>{err}</div>}<nav><button className={view==='artikel'?'active':''} onClick={()=>setView('artikel')}><Package size={18}/> Artikel</button><button className={view==='abschriften'?'active':''} onClick={()=>setView('abschriften')}><ClipboardList size={18}/> Abschriften</button><button className={view==='backshop'?'active':''} onClick={()=>setView('backshop')}>Backwaren Tagesende</button></nav>{view==='artikel'&&<><div className='filters'><div><Search size={18}/><input placeholder='Suchen nach Artikel, Barcode oder Mitarbeiter' value={q} onChange={e=>setQ(e.target.value)}/></div><select value={cat} onChange={e=>setCat(e.target.value)}><option value='alle'>Alle Kategorien</option>{categories.map(x=><option key={x}>{x}</option>)}</select></div><div className='list'>{loading?<div className='card'>Lade...</div>:filtered.map(item=><Item key={item.id} item={item} del={remove} off={writeOff}/>)}</div></>}{view==='abschriften'&&<WriteOffs offs={offs}/>} {view==='backshop'&&<div className='list'>{items.filter(i=>i.kategorie==='Backshop').map(i=><div className='card item' key={i.id}><Product item={i}/><button className='red' onClick={()=>writeOff(i,'Backwaren Tagesende')}>Als Tagesabschrift</button></div>)}</div>}</div>
-}
-
+async function notify(items){if(!('Notification'in window))return alert('Benachrichtigungen nicht unterstützt'); if(Notification.permission!=='granted'){const p=await Notification.requestPermission(); if(p!=='granted')return} await registerSW(); const exp=items.filter(x=>daysUntil(x.mhd)<=2); const text=exp.length?exp.slice(0,5).map(x=>`${x.artikel} · MHD ${new Date(x.mhd).toLocaleDateString('de-DE')}`).join('\n'):'Aktuell läuft nichts innerhalb von 2 Tagen ab.'; const reg=await navigator.serviceWorker?.ready; if(reg?.showNotification) reg.showNotification(exp.length?'MHD Warnung':'MHD Kontrolle',{body:text,tag:'mhd'}); else new Notification(exp.length?'MHD Warnung':'MHD Kontrolle',{body:text})}
+async function scan(){if(!('BarcodeDetector'in window)){alert('Barcode-Scanner wird auf diesem Browser nicht unterstützt. Bitte Chrome/Android nutzen oder Barcode eintippen.');return null} const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}}); const video=document.createElement('video'); video.srcObject=stream; video.playsInline=true; await video.play(); const det=new BarcodeDetector({formats:['ean_13','ean_8','upc_a','upc_e','code_128']}); return new Promise(res=>{let stop=false; const o=document.createElement('div'); o.className='scanOverlay'; o.innerHTML='<div class="scanText">Barcode vor die Kamera halten</div>'; const b=document.createElement('button'); b.textContent='Abbrechen'; b.className='btn light'; video.className='scanVideo'; o.append(video,b); document.body.append(o); function close(v){if(stop)return;stop=true;stream.getTracks().forEach(t=>t.stop());o.remove();res(v)} b.onclick=()=>close(null); async function loop(){if(stop)return; try{const c=await det.detect(video); if(c.length)return close(c[0].rawValue)}catch{} requestAnimationFrame(loop)} loop()})}
+function App(){const[session,setSession]=useState(null),[auth,setAuth]=useState(true),[nr,setNr]=useState(''),[pw,setPw]=useState(''),[err,setErr]=useState(''),[items,setItems]=useState([]),[offs,setOffs]=useState([]),[view,setView]=useState('artikel'),[q,setQ]=useState(''),[cat,setCat]=useState('alle'),[loading,setLoading]=useState(false),[form,setForm]=useState({artikel:'',barcode:'',bild_url:'',kategorie:'Kühlung',mhd:'',menge:'',mitarbeiter:'Michael'});
+useEffect(()=>{registerSW(); if(!supabase){setAuth(false);return} supabase.auth.getSession().then(({data})=>{setSession(data.session);setAuth(false)}); const {data}=supabase.auth.onAuthStateChange((_,s)=>setSession(s)); return()=>data.subscription.unsubscribe()},[]);
+async function doLogin(){setErr(''); const {error}=await supabase.auth.signInWithPassword({email:loginMail(nr),password:pw}); if(error)setErr('Login fehlgeschlagen. Nummer oder Passwort prüfen.')}
+async function load(){if(!session)return; setLoading(true); const a=await supabase.from('mhd_artikel').select('*').order('mhd',{ascending:true}); const b=await supabase.from('abschriften').select('*').order('created_at',{ascending:false}); if(a.error)setErr('Artikel konnten nicht geladen werden.'); else setItems(a.data||[]); if(!b.error)setOffs(b.data||[]); setLoading(false)}
+useEffect(()=>{if(!session)return; load(); const ch=supabase.channel('live').on('postgres_changes',{event:'*',schema:'public',table:'mhd_artikel'},load).on('postgres_changes',{event:'*',schema:'public',table:'abschriften'},load).subscribe(); return()=>supabase.removeChannel(ch)},[session]);
+const filtered=useMemo(()=>items.filter(i=>(cat==='alle'||i.kategorie===cat)&&`${i.artikel} ${i.mitarbeiter} ${i.barcode||''}`.toLowerCase().includes(q.toLowerCase())).sort((a,b)=>new Date(a.mhd)-new Date(b.mhd)),[items,q,cat]);
+const stats=useMemo(()=>({total:items.length,bad:items.filter(i=>daysUntil(i.mhd)<0).length,warn:items.filter(i=>daysUntil(i.mhd)>=0&&daysUntil(i.mhd)<=2).length,week:items.filter(i=>daysUntil(i.mhd)>2&&daysUntil(i.mhd)<=7).length}),[items]);
+async function add(){if(!form.artikel||!form.mhd)return setErr('Bitte Artikelname und MHD eintragen.'); const {error}=await supabase.from('mhd_artikel').insert({...form,menge:Number(form.menge||1),barcode:form.barcode||null,bild_url:form.bild_url||null,user_id:session.user.id}); if(error)setErr('Speichern fehlgeschlagen.'); else{setForm({...form,artikel:'',barcode:'',bild_url:'',mhd:'',menge:''});load()}}
+async function remove(id){await supabase.from('mhd_artikel').delete().eq('id',id);load()}
+async function writeOff(item,grund='Abgelaufen'){await supabase.from('abschriften').insert({artikel:item.artikel,barcode:item.barcode,kategorie:item.kategorie,mhd:item.mhd,menge:item.menge,grund,mitarbeiter:form.mitarbeiter,bild_url:item.bild_url,user_id:session.user.id}); await remove(item.id)}
+async function doScan(){const code=await scan(); if(!code)return; setForm(f=>({...f,barcode:code})); const p=await fetchProduct(code); if(p)setForm(f=>({...f,barcode:code,artikel:p.artikel||f.artikel,kategorie:p.kategorie||f.kategorie,bild_url:p.bild_url||f.bild_url})); else setErr('Kein Produkt gefunden. Bitte manuell eintragen.')}
+async function uploadImage(e){const file=e.target.files?.[0]; if(!file)return; const path=`artikel/${Date.now()}-${file.name}`; const {error}=await supabase.storage.from('artikelbilder').upload(path,file,{upsert:true}); if(error)return setErr('Bild konnte nicht hochgeladen werden.'); const {data}=supabase.storage.from('artikelbilder').getPublicUrl(path); setForm(f=>({...f,bild_url:data.publicUrl}))}
+if(auth)return <div className='center'>Lade...</div>; if(!supabase)return <div className='center'>Supabase ENV Variablen fehlen.</div>; if(!session)return <div className='login'><div className='card loginCard'><h1>MHD Kontrolle</h1><p>Mitarbeiter-Nummer und Passwort</p><input placeholder='Nummer z.B. 01' value={nr} onChange={e=>setNr(e.target.value)}/><input placeholder='4-stelliges Passwort' type='password' value={pw} onChange={e=>setPw(e.target.value)} onKeyDown={e=>e.key==='Enter'&&doLogin()}/><button onClick={doLogin}>Einloggen</button>{err&&<b className='error'>{err}</b>}</div></div>;
+return <div className='app'><header><div><small>Tankstelle Ludweiler · MHD Kontrolle</small><h1>MHD Dashboard</h1><p>Barcode, Bilder, MHD-Warnungen und Abschriften.</p></div><div className='headBtns'><button onClick={()=>notify(items)}><Bell size={18}/> Benachrichtigung</button><button onClick={()=>supabase.auth.signOut()}><LogOut size={18}/> Abmelden</button></div></header><section className='stats'><Card t='Gesamt' v={stats.total}/><Card t='Abgelaufen' v={stats.bad} c='bad'/><Card t='Heute/Bald' v={stats.warn} c='warn'/><Card t='Diese Woche' v={stats.week} c='soon'/></section><section className='card form'><input placeholder='Artikelname' value={form.artikel} onChange={e=>setForm({...form,artikel:e.target.value})}/><div className='row'><input placeholder='Barcode' value={form.barcode} onChange={async e=>{setForm({...form,barcode:e.target.value});}} onBlur={async()=>{const p=await fetchProduct(form.barcode); if(p)setForm(f=>({...f,artikel:f.artikel||p.artikel,kategorie:p.kategorie,bild_url:p.bild_url}))}}/><button onClick={doScan}><ScanBarcode size={18}/></button></div><select value={form.kategorie} onChange={e=>setForm({...form,kategorie:e.target.value})}>{categories.map(x=><option key={x}>{x}</option>)}</select><input type='date' value={form.mhd} onChange={e=>setForm({...form,mhd:e.target.value})}/><input type='number' placeholder='Menge' value={form.menge} onChange={e=>setForm({...form,menge:e.target.value})}/><select value={form.mitarbeiter} onChange={e=>setForm({...form,mitarbeiter:e.target.value})}>{staff.map(x=><option key={x}>{x}</option>)}</select><label className='upload'><Camera size={18}/> Eigenes Bild<input type='file' accept='image/*' onChange={uploadImage}/></label>{form.bild_url&&<img className='preview' src={form.bild_url}/>}<button className='add' onClick={add}><Plus size={18}/> Artikel hinzufügen</button></section>{err&&<div className='errorBox'>{err}</div>}<nav><button className={view==='artikel'?'active':''} onClick={()=>setView('artikel')}><Package size={18}/> Artikel</button><button className={view==='abschriften'?'active':''} onClick={()=>setView('abschriften')}><ClipboardList size={18}/> Abschriften</button><button className={view==='backshop'?'active':''} onClick={()=>setView('backshop')}>Backwaren Tagesende</button></nav>{view==='artikel'&&<><div className='filters'><div><Search size={18}/><input placeholder='Suchen nach Artikel, Barcode oder Mitarbeiter' value={q} onChange={e=>setQ(e.target.value)}/></div><select value={cat} onChange={e=>setCat(e.target.value)}><option value='alle'>Alle Kategorien</option>{categories.map(x=><option key={x}>{x}</option>)}</select></div><div className='list'>{loading?<div className='card'>Lade...</div>:filtered.map(item=><Item key={item.id} item={item} del={remove} off={writeOff}/>)}</div></>}{view==='abschriften'&&<WriteOffs offs={offs}/>} {view==='backshop'&&<div className='list'>{items.filter(i=>i.kategorie==='Backshop').map(i=><div className='card item' key={i.id}><Product item={i}/><button className='red' onClick={()=>writeOff(i,'Backwaren Tagesende')}>Als Tagesabschrift</button></div>)}</div>}</div>}
 function Card({t,v,c=''}){return <div className={`card stat ${c}`}><span>{t}</span><strong>{v}</strong></div>}
 function Product({item}){return <div className='product'>{item.bild_url?<img src={item.bild_url}/>:<div className='ph'/>}<div><h3>{item.artikel}</h3><p>{item.kategorie}{item.barcode?` · Barcode: ${item.barcode}`:''}</p></div></div>}
 function Item({item,del,off}){const s=status(item.mhd),I=s.I,d=daysUntil(item.mhd);return <div className={`card item ${s.c}`}><Product item={item}/><div><small>MHD</small><b>{new Date(item.mhd).toLocaleDateString('de-DE')}</b></div><div><small>Restzeit</small><b>{d<0?`${Math.abs(d)} Tage drüber`:`${d} Tage`}</b></div><div><small>Menge / Mitarbeiter</small><b>{item.menge} Stk. · {item.mitarbeiter}</b></div><span className={`badge ${s.c}`}><I size={14}/>{s.t}</span><button onClick={()=>off(item,d<0?'Abgelaufen':'Sonstiges')}>Abschrift</button><button className='ghost' onClick={()=>del(item.id)}><Trash2 size={18}/></button></div>}
 function WriteOffs({offs}){const today=new Date().toISOString().slice(0,10);const list=offs.filter(x=>x.created_at?.slice(0,10)===today);return <div className='list'><div className='card'><h2>Abschriftenliste heute</h2><p>{list.length} Positionen · {list.reduce((s,x)=>s+Number(x.menge||0),0)} Stück</p></div>{list.map(x=><div className='card item' key={x.id}><Product item={x}/><div><small>Menge</small><b>{x.menge} Stk.</b></div><div><small>Grund</small><b>{x.grund}</b></div><div><small>Mitarbeiter</small><b>{x.mitarbeiter}</b></div></div>)}</div>}
-
 createRoot(document.getElementById('root')).render(<App/>);
