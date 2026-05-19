@@ -1,42 +1,22 @@
-# MHD Management App - Tankstelle
+# MHD Tankstelle App - finale Version
 
-Funktionen:
-- Mitarbeiter-Login per Nummer + 4-stelligem Passwort
-- Barcode-Scanner per Kamera
-- automatische Produktdaten über OpenFoodFacts
-- eigene Artikelbilder hochladen oder fotografieren
-- MHD-Übersicht mit Warnungen
+Enthalten:
+- Mitarbeiter Login mit Nummer + 4-stelligem Passwort
+- Barcode Scanner
+- automatische Produktdaten/Bilder über OpenFoodFacts
+- eigene Artikelbilder hochladen
+- MHD Dashboard
 - Abschriftenliste
 - Backwaren Tagesende
-- iPhone/Android als Web-App/PWA
+- Browser/PWA Benachrichtigungen
 
-## Supabase einrichten
-1. Supabase-Projekt erstellen.
-2. SQL Editor öffnen und `SUPABASE_SQL.sql` ausführen.
-3. Unter Authentication > Users Mitarbeiter anlegen:
-   - `01@tankstelle.local`, Passwort z. B. `1234`
-   - `02@tankstelle.local`, Passwort z. B. `5678`
-4. Unter Project Settings > API kopieren:
-   - Project URL
-   - anon public key
+## Supabase
+SQL Editor öffnen und `database.sql` ausführen.
+Mitarbeiter als User anlegen, z.B. `01@tankstelle.local` mit Passwort `1234`.
 
-## Vercel einrichten
-1. Projekt zu GitHub hochladen oder als neues Projekt importieren.
-2. In Vercel Project Settings > Environment Variables eintragen:
-   - `VITE_SUPABASE_URL` = Supabase Project URL
-   - `VITE_SUPABASE_ANON_KEY` = Supabase anon public key
-3. Deploy starten.
+## Vercel
+Environment Variables:
+- VITE_SUPABASE_URL
+- VITE_SUPABASE_ANON_KEY
 
-## Lokal testen
-```bash
-npm install
-npm run dev
-```
-
-## Personalwechsel
-- Neuer Mitarbeiter: Supabase > Authentication > Users > Add user.
-- Mitarbeiter entfernen: User löschen oder Passwort ändern.
-- Nummer ändern: neuen User mit neuer Nummer anlegen.
-
-## Hinweis zu Benachrichtigungen
-Benachrichtigungen funktionieren am besten, wenn die App über HTTPS läuft und auf dem Handy zum Home-Bildschirm hinzugefügt wurde.
+Danach deployen.
