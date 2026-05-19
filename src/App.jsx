@@ -1,7 +1,8 @@
 export default function App() {
   return (
-    <div>
-      <h1>MHD Tankstelle App läuft 🚀</h1>
+    <div style={{padding:"40px"}}>
+      <h1>MHD Dashboard läuft 🚀</h1>
+      <h2>Login erfolgreich entfernt ✅</h2>
     </div>
   )
 }
