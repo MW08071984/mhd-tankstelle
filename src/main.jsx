@@ -9,7 +9,7 @@ const supabaseKey=import.meta.env.VITE_SUPABASE_ANON_KEY;
 const supabase=supabaseUrl&&supabaseKey?createClient(supabaseUrl,supabaseKey):null;
 
 const categories=['Kühlung','Getränke','Milchprodukte','Snacks','Süßwaren','Backshop','Sonstiges'];
-const staff=['Michael','Christian','Ali','Mara','Sven','Lisa','Nina','Tom'];
+const staff=['Michael','Christian'];
 
 function daysUntil(d){const today=new Date();today.setHours(0,0,0,0);return Math.ceil((new Date(d+'T00:00:00')-today)/86400000)}
 function status(mhd){const d=daysUntil(mhd); if(d<0)return{t:'Abgelaufen',c:'bad',I:AlertTriangle}; if(d<=2)return{t:'Heute/Bald',c:'warn',I:Clock}; if(d<=7)return{t:'Diese Woche',c:'soon',I:Clock}; return{t:'OK',c:'ok',I:CheckCircle2}}
